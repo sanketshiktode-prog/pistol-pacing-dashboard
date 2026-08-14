@@ -62,7 +62,7 @@ a{color:var(--info);text-decoration:none}
 .btn.red{background:var(--pp);border-color:var(--pp);color:#fff}
 .btn.red:hover{background:var(--pp-dark)}
 .btn.ghost{background:transparent}
-.content{padding:22px 26px 60px;max-width:1680px;width:100%;margin:0 auto}
+.content{padding:22px 26px 60px;width:100%}
 
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:14px 16px}
@@ -388,11 +388,21 @@ details.camps .cs{font-weight:700;white-space:nowrap}
       <!-- ============ CITIES ============ -->
       <section id="view-cities" style="display:none">
         <div class="fbar">
-          <div class="seg" id="citySeg">
-            <button data-s="combined" class="on">Combined</button>
-            <button data-s="planned">L+S Planned</button>
-            <button data-s="unplanned">L+S Un-Planned</button>
-            <button data-s="builtup">Builtup</button>
+          <span class="lb">Launch Status</span>
+          <div class="dd" id="cDD">
+            <button class="dd-btn" id="cDDBtn" type="button">
+              <span id="cDDLabel">All buckets</span><span class="caret">▼</span>
+            </button>
+            <div class="dd-pop" id="cDDPop">
+              <label class="dd-item"><input type="checkbox" data-b="Planned" checked><span>Launch+Sustenance · Planned</span><span class="sub" data-c="Planned">—</span></label>
+              <label class="dd-item"><input type="checkbox" data-b="Un-Planned" checked><span>Launch+Sustenance · Un-Planned</span><span class="sub" data-c="Un-Planned">—</span></label>
+              <label class="dd-item"><input type="checkbox" data-b="Builtup" checked><span>Builtup</span><span class="sub" data-c="Builtup">—</span></label>
+              <div class="dd-sep"></div>
+              <div class="dd-actions">
+                <button type="button" data-a="all">Select all</button>
+                <button type="button" data-a="none">Clear</button>
+              </div>
+            </div>
           </div>
           <span class="count" id="cCount"></span>
         </div>
@@ -564,7 +574,7 @@ const S = {
   data: null, plat: null, un: { g: [], m: [] }, mode: 'loading', lastSync: null, view: 'overview',
   win: { start: null, end: null },
   pf: { city: '', seg: '', camp: '', q: '', quick: '' }, pSort: { k: 'budget', d: -1 },
-  cSeg: 'combined', cSort: { k: 'budget', d: -1 },
+  cBkt: new Set(['Planned','Un-Planned','Builtup']), cSort: { k: 'budget', d: -1 },
   sf: { city: '', q: '' }, sSort: { k: 'budget', d: -1 },
   pxMode: 'spend', oBkt: new Set(['Planned','Un-Planned','Builtup']), unQ: '',
   charts: {}, gids: {}, pRows: []
@@ -1020,17 +1030,20 @@ function quickPass(p, q){
 function kpiCard(lb, v, s, cls){
   return '<div class="kpi"><div class="lb">' + lb + '</div><div class="v">' + v + '</div><div class="s ' + (cls||'') + '">' + s + '</div></div>';
 }
+const BKT_KEY = { 'Planned': 'planned', 'Un-Planned': 'unplanned', 'Builtup': 'builtup' };
+function bktLabelFor(B){
+  if (!B || B.size === 0 || B.size === 3) return 'All buckets';
+  if (B.size === 1){
+    const b = [...B][0];
+    return b + ' only';
+  }
+  return [...B].join(' + ');
+}
+function bktLabel(){ return bktLabelFor(S.oBkt); }
 function overviewProjects(){
   const all = S.data.projects;
   if (!S.oBkt || S.oBkt.size === 0 || S.oBkt.size === 3) return all;
   return all.filter(p => S.oBkt.has(p.bucket));
-}
-function bktLabel(){
-  const B = S.oBkt;
-  if (!B || B.size === 0 || B.size === 3) return 'All buckets';
-  if (B.size === 1) return [...B][0] === 'Planned' ? 'Planned only' : ([...B][0] === 'Un-Planned' ? 'Un-Planned only' : 'Builtup only');
-  const short = { 'Planned': 'Planned', 'Un-Planned': 'Un-Planned', 'Builtup': 'Builtup' };
-  return [...B].map(b => short[b]).join(' + ');
 }
 function renderAttention(){
   const en = enrich(overviewProjects());
@@ -1256,9 +1269,10 @@ function closeModal(){ $('overlay').classList.remove('show'); destroyModalCharts
 /* ================= RENDER: CITIES ================= */
 function cityRows(){
   const s = S.data.summary;
-  if (S.cSeg !== 'combined') return s[S.cSeg].slice();
+  const active = (S.cBkt.size > 0 && S.cBkt.size < 3) ? [...S.cBkt] : ['Planned','Un-Planned','Builtup'];
+  if (active.length === 1) return (s[BKT_KEY[active[0]]] || []).slice();
   const m = {};
-  ['planned','unplanned','builtup'].forEach(k => s[k].forEach(r => {
+  active.forEach(b => (s[BKT_KEY[b]] || []).forEach(r => {
     if (!m[r.city]) m[r.city] = { city: r.city, budget: 0, spent: 0, qlTgt: 0, totQL: 0 };
     m[r.city].budget += r.budget; m[r.city].spent += r.spent; m[r.city].qlTgt += r.qlTgt; m[r.city].totQL += r.totQL;
   }));
@@ -1266,7 +1280,12 @@ function cityRows(){
 }
 function renderCities(){
   const rows = enrich(cityRows()).sort(sorter(S.cSort));
-  $('cCount').textContent = rows.length + ' cities · ' + ({combined:'All segments',planned:'Launch+Sustenance Planned',unplanned:'Launch+Sustenance Un-Planned',builtup:'Builtup'})[S.cSeg];
+  $('cCount').textContent = rows.length + ' cities · ' + bktLabelFor(S.cBkt);
+  $('cDDLabel').textContent = bktLabelFor(S.cBkt);
+  ['Planned','Un-Planned','Builtup'].forEach(b => {
+    const el = document.querySelector('#cDDPop .sub[data-c="' + b + '"]');
+    if (el) el.textContent = fmtN((S.data.summary[BKT_KEY[b]] || []).length, 0);
+  });
   $('cBody').innerHTML = rows.map(r => {
     const st = paceStatus(r.paceS);
     return '<tr><td class="l"><b>' + esc(r.city) + '</b></td>' +
@@ -1287,7 +1306,7 @@ function renderCities(){
   if (typeof Chart === 'undefined') return;
   const P = paceInfo();
   const sorted = rows.slice().sort((a,b) => b.budget - a.budget);
-  $('cChartTitle').textContent = 'City comparison · ' + ({combined:'Combined',planned:'L+S Planned',unplanned:'L+S Un-Planned',builtup:'Builtup'})[S.cSeg];
+  $('cChartTitle').textContent = 'City comparison · ' + bktLabelFor(S.cBkt);
   destroyChart('cchart');
   S.charts.cchart = new Chart($('cChart'), {
     type: 'bar',
@@ -1484,7 +1503,7 @@ function exportCSV(){
     rows = [['Project','City','SM','Segment','Campaign','Budget','Spent','Expected Spend','Spend Pace %','Proj EOM Spend','QL Target','QL Achieved','QL Pace %','Proj EOM QL','MTD CPQL','Target CPQL','EOI CRM','EOI Target']];
     (S.view === 'projects' && S.pRows.length ? S.pRows : enrich(S.data.projects)).forEach(p => rows.push([p.project, p.city, p.sm || p.mktSM, p.seg, p.camp, p.budget, p.spent, Math.round(p.expS), p.paceS==null?'':p.paceS.toFixed(1), p.projS==null?'':Math.round(p.projS), p.qlTgt, p.totQL, p.paceQ==null?'':p.paceQ.toFixed(1), p.projQ==null?'':Math.round(p.projQ), p.cpql==null?'':Math.round(p.cpql), p.tgtCPQL, p.crmEOI, p.tgtEOI]));
   } else if (S.view === 'cities'){
-    name = 'city_pacing_' + S.cSeg;
+    name = 'city_pacing_' + ([...S.cBkt].join('_').replace(/\s+/g,'').replace(/\-/g,'') || 'all').toLowerCase();
     rows = [['City','Budget','Spent','Expected Spend','Spend Pace %','Proj EOM Spend','QL Target','QL Achieved','QL Pace %','Proj EOM QL']];
     enrich(cityRows()).forEach(r => rows.push([r.city, r.budget, r.spent, Math.round(r.expS), r.paceS==null?'':r.paceS.toFixed(1), r.projS==null?'':Math.round(r.projS), r.qlTgt, r.totQL, r.paceQ==null?'':r.paceQ.toFixed(1), r.projQ==null?'':Math.round(r.projQ)]));
   } else if (S.view === 'platform'){
@@ -1569,27 +1588,32 @@ function init(){
   $('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeModal(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-  const ddEl = $('oDD'), ddBtn = $('oDDBtn'), ddPop = $('oDDPop');
-  ddBtn.addEventListener('click', e => { e.stopPropagation(); ddEl.classList.toggle('open'); });
-  ddPop.addEventListener('click', e => e.stopPropagation());
-  document.addEventListener('click', () => ddEl.classList.remove('open'));
-  ddPop.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.addEventListener('change', () => {
-    if (cb.checked) S.oBkt.add(cb.dataset.b); else S.oBkt.delete(cb.dataset.b);
-    renderOverview();
-  }));
-  ddPop.querySelectorAll('.dd-actions button').forEach(b => b.addEventListener('click', () => {
-    const on = b.dataset.a === 'all';
-    S.oBkt = new Set(on ? ['Planned','Un-Planned','Builtup'] : []);
-    ddPop.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = on);
-    renderOverview();
-  }));
+  function wireBktDropdown(ddId, btnId, popId, getSet, setSet, onChange){
+    const ddEl = $(ddId), ddBtn = $(btnId), ddPop = $(popId);
+    ddBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      // close any other open dropdowns first
+      document.querySelectorAll('.dd.open').forEach(d => { if (d !== ddEl) d.classList.remove('open'); });
+      ddEl.classList.toggle('open');
+    });
+    ddPop.addEventListener('click', e => e.stopPropagation());
+    ddPop.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.addEventListener('change', () => {
+      const B = getSet();
+      if (cb.checked) B.add(cb.dataset.b); else B.delete(cb.dataset.b);
+      onChange();
+    }));
+    ddPop.querySelectorAll('.dd-actions button').forEach(b => b.addEventListener('click', () => {
+      const on = b.dataset.a === 'all';
+      setSet(new Set(on ? ['Planned','Un-Planned','Builtup'] : []));
+      ddPop.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = on);
+      onChange();
+    }));
+  }
+  wireBktDropdown('oDD', 'oDDBtn', 'oDDPop', () => S.oBkt, v => S.oBkt = v, renderOverview);
+  wireBktDropdown('cDD', 'cDDBtn', 'cDDPop', () => S.cBkt, v => S.cBkt = v, renderCities);
+  document.addEventListener('click', () => document.querySelectorAll('.dd.open').forEach(d => d.classList.remove('open')));
   $('sfCity').addEventListener('change', e => { S.sf.city = e.target.value; renderSM(); });
   $('sfQ').addEventListener('input', e => { S.sf.q = e.target.value; renderSM(); });
-  document.querySelectorAll('#citySeg button').forEach(b => b.addEventListener('click', () => {
-    S.cSeg = b.dataset.s;
-    document.querySelectorAll('#citySeg button').forEach(x => x.classList.toggle('on', x === b));
-    renderCities();
-  }));
   document.querySelectorAll('#pxSeg button').forEach(b => b.addEventListener('click', () => {
     S.pxMode = b.dataset.m;
     document.querySelectorAll('#pxSeg button').forEach(x => x.classList.toggle('on', x === b));
