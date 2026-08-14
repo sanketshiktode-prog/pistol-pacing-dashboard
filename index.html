@@ -112,6 +112,22 @@ a{color:var(--info);text-decoration:none}
 .seg{display:inline-flex;background:#EDF1F7;border-radius:11px;padding:3px}
 .seg button{border:0;background:none;padding:7px 14px;border-radius:9px;font-size:12.5px;font-weight:600;color:var(--mut)}
 .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(16,26,47,.12)}
+.dd{position:relative;display:inline-block}
+.dd-btn{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;min-width:220px;justify-content:space-between}
+.dd-btn:hover{border-color:#B8C2D4}
+.dd-btn .caret{font-size:9px;color:var(--mut);transition:transform .15s}
+.dd.open .dd-btn{border-color:var(--pp);box-shadow:0 0 0 3px rgba(239,62,54,.10)}
+.dd.open .caret{transform:rotate(180deg)}
+.dd-pop{position:absolute;top:calc(100% + 6px);left:0;min-width:260px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(16,26,47,.14);padding:8px;z-index:50;display:none}
+.dd.open .dd-pop{display:block}
+.dd-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--ink);font-weight:500}
+.dd-item:hover{background:#F5F7FB}
+.dd-item input{accent-color:var(--pp);width:15px;height:15px;cursor:pointer;margin:0}
+.dd-item .sub{font-size:11px;color:var(--mut);font-weight:500;margin-left:auto}
+.dd-sep{height:1px;background:var(--line);margin:6px 4px}
+.dd-actions{display:flex;gap:4px;padding:0 4px}
+.dd-actions button{flex:1;background:none;border:0;padding:6px 8px;font-size:11.5px;font-weight:600;color:var(--pp);cursor:pointer;border-radius:6px}
+.dd-actions button:hover{background:#FDECEC}
 .hint{font-size:12px;color:var(--mut);margin:-6px 0 10px}
 .twrap{overflow:auto;border:1px solid var(--line);border-radius:12px;max-height:66vh}
 table{border-collapse:separate;border-spacing:0;width:100%;min-width:1080px;font-size:13px}
@@ -258,11 +274,20 @@ details.camps .cs{font-weight:700;white-space:nowrap}
       <section id="view-overview">
         <div class="fbar">
           <span class="lb">Launch Status</span>
-          <div class="seg" id="oSeg">
-            <button data-s="" class="on">All</button>
-            <button data-s="Planned">Launch+Sustenance · Planned</button>
-            <button data-s="Un-Planned">Launch+Sustenance · Un-Planned</button>
-            <button data-s="Builtup">Builtup</button>
+          <div class="dd" id="oDD">
+            <button class="dd-btn" id="oDDBtn" type="button">
+              <span id="oDDLabel">All buckets</span><span class="caret">▼</span>
+            </button>
+            <div class="dd-pop" id="oDDPop">
+              <label class="dd-item"><input type="checkbox" data-b="Planned" checked><span>Launch+Sustenance · Planned</span><span class="sub" data-c="Planned">—</span></label>
+              <label class="dd-item"><input type="checkbox" data-b="Un-Planned" checked><span>Launch+Sustenance · Un-Planned</span><span class="sub" data-c="Un-Planned">—</span></label>
+              <label class="dd-item"><input type="checkbox" data-b="Builtup" checked><span>Builtup</span><span class="sub" data-c="Builtup">—</span></label>
+              <div class="dd-sep"></div>
+              <div class="dd-actions">
+                <button type="button" data-a="all">Select all</button>
+                <button type="button" data-a="none">Clear</button>
+              </div>
+            </div>
           </div>
           <span class="count" id="oCount"></span>
         </div>
@@ -541,7 +566,7 @@ const S = {
   pf: { city: '', seg: '', camp: '', q: '', quick: '' }, pSort: { k: 'budget', d: -1 },
   cSeg: 'combined', cSort: { k: 'budget', d: -1 },
   sf: { city: '', q: '' }, sSort: { k: 'budget', d: -1 },
-  pxMode: 'spend', oSeg: '', unQ: '',
+  pxMode: 'spend', oBkt: new Set(['Planned','Un-Planned','Builtup']), unQ: '',
   charts: {}, gids: {}, pRows: []
 };
 
@@ -996,7 +1021,16 @@ function kpiCard(lb, v, s, cls){
   return '<div class="kpi"><div class="lb">' + lb + '</div><div class="v">' + v + '</div><div class="s ' + (cls||'') + '">' + s + '</div></div>';
 }
 function overviewProjects(){
-  return S.oSeg ? S.data.projects.filter(p => (p.bucket || '') === S.oSeg) : S.data.projects;
+  const all = S.data.projects;
+  if (!S.oBkt || S.oBkt.size === 0 || S.oBkt.size === 3) return all;
+  return all.filter(p => S.oBkt.has(p.bucket));
+}
+function bktLabel(){
+  const B = S.oBkt;
+  if (!B || B.size === 0 || B.size === 3) return 'All buckets';
+  if (B.size === 1) return [...B][0] === 'Planned' ? 'Planned only' : ([...B][0] === 'Un-Planned' ? 'Un-Planned only' : 'Builtup only');
+  const short = { 'Planned': 'Planned', 'Un-Planned': 'Un-Planned', 'Builtup': 'Builtup' };
+  return [...B].map(b => short[b]).join(' + ');
 }
 function renderAttention(){
   const en = enrich(overviewProjects());
@@ -1020,9 +1054,15 @@ function renderOverview(){
   const scope = overviewProjects();
   const T = totalsOf(scope);
   const stS = paceStatus(T.paceS), stQ = paceStatus(T.paceQ);
-  $('oCount').textContent = fmtN(scope.length, 0) + ' projects' + (S.oSeg ? ' · ' + S.oSeg : '');
+  $('oCount').textContent = fmtN(scope.length, 0) + ' projects · ' + bktLabel();
+  $('oDDLabel').textContent = bktLabel();
+  // per-bucket counts inside the popover
+  ['Planned','Un-Planned','Builtup'].forEach(b => {
+    const el = document.querySelector('#oDDPop .sub[data-c="' + b + '"]');
+    if (el) el.textContent = fmtN(S.data.projects.filter(p => p.bucket === b).length, 0);
+  });
   $('kpis').innerHTML =
-    kpiCard('Total Budget', fmtMoney(T.budget), fmtN(scope.length,0) + ' projects' + (S.oSeg ? ' · ' + S.oSeg : '')) +
+    kpiCard('Total Budget', fmtMoney(T.budget), fmtN(scope.length,0) + ' projects · ' + bktLabel()) +
     kpiCard('Spent Till Date', fmtMoney(T.spent), 'Utilisation <b>' + fmtPct(T.util) + '</b>') +
     kpiCard('Expected Till ' + fmtDate(P.asOf), fmtMoney(T.expS), fmtPct(T.expPct) + ' of window · T-1 basis') +
     kpiCard('Spend Pace', fmtPct(T.paceS), stS.t + ' vs plan', stS.c + 'c') +
@@ -1529,9 +1569,18 @@ function init(){
   $('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeModal(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-  document.querySelectorAll('#oSeg button').forEach(b => b.addEventListener('click', () => {
-    S.oSeg = b.dataset.s;
-    document.querySelectorAll('#oSeg button').forEach(x => x.classList.toggle('on', x === b));
+  const ddEl = $('oDD'), ddBtn = $('oDDBtn'), ddPop = $('oDDPop');
+  ddBtn.addEventListener('click', e => { e.stopPropagation(); ddEl.classList.toggle('open'); });
+  ddPop.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => ddEl.classList.remove('open'));
+  ddPop.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.addEventListener('change', () => {
+    if (cb.checked) S.oBkt.add(cb.dataset.b); else S.oBkt.delete(cb.dataset.b);
+    renderOverview();
+  }));
+  ddPop.querySelectorAll('.dd-actions button').forEach(b => b.addEventListener('click', () => {
+    const on = b.dataset.a === 'all';
+    S.oBkt = new Set(on ? ['Planned','Un-Planned','Builtup'] : []);
+    ddPop.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = on);
     renderOverview();
   }));
   $('sfCity').addEventListener('change', e => { S.sf.city = e.target.value; renderSM(); });
