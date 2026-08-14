@@ -560,9 +560,12 @@ details.camps .cs{font-weight:700;white-space:nowrap}
 <script>
 'use strict';
 /* ================= CONFIG ================= */
-const SHEET_ID = '1oaIWe_IA_mlx7UdeC51bLYtiTIyMNocE-LtsKMFRe08';
-const SHEET_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit';
+/* Published "Spends Tracker Database" (synced from the main Spend Tracker by Apps Script).
+   PUB_BASE is the source of truth — SHEET_ID is only used for the optional gviz fallback
+   and the "Open Sheet" button. Leave SHEET_ID blank if the doc isn't link-viewable. */
+const SHEET_ID = '';
 const PUB_BASE = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRXZinVcktm-91m-kG0KTCcLahZ8cr4QG6NX8iBOABq6pCRS0ZIs3uRZVnjn_EeYpk9t_LZI5X2HVwP/pub';
+const SHEET_URL = SHEET_ID ? ('https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit') : (PUB_BASE + 'html');
 const PUB_CSV_DEFAULT = PUB_BASE + '?output=csv';
 const ALL_TABS = ["SM Wise Spends","Aug Realization","Summary","Realisation Working","Sheet34","Realised Builtup","Dashboard","Master Sheet","Sheet45","Sheet42","QL LEADS DATA","CRM Project Names","Sheet37","Sheet41","Pivot Table 5","Pivot Table 4","Sheet38","ROI sheet","Sheet35","FY-Cost","Pivot Table 2","MTD Cost","Unmapped Spends","Google MTD Spends","FB MTD Spends","May (Launch)","99 Acres Projects","Launch","MTD ROI Mapping (May)","YTD ROI Mapping","Sheet19","Bangalore/Hyd Trend","CRM Project Dump","Sales Dump","MIS","Dash History"];
 const PLATFORMS = ['Search','DemandGen','PMax','Display','Meta','VAPP','WhatsApp Blast','Others'];
@@ -577,7 +580,7 @@ const S = {
   cBkt: new Set(['Planned','Un-Planned','Builtup']), cSort: { k: 'budget', d: -1 },
   sf: { city: '', q: '' }, sSort: { k: 'budget', d: -1 },
   pxMode: 'spend', oBkt: new Set(['Planned','Un-Planned','Builtup']), unQ: '',
-  charts: {}, gids: {}, pRows: []
+  charts: {}, gids: {}, pRows: [], diag: []
 };
 
 /* ================= HELPERS ================= */
@@ -660,16 +663,33 @@ function csvGrid(text){
   return rows;
 }
 async function discoverGids(){
+  S.diag = [];
   try {
-    const html = await fetchText(PUB_BASE + 'html?widget=false&chrome=false');
+    const html = await fetchText(PUB_BASE + 'html?widget=true&headers=false&cb=' + Date.now());
     const map = {};
     let m;
-    const re1 = /id="sheet-button-(\d+)"[^>]*>\s*<a[^>]*>([^<]+)</g;
+    // Pattern A: <li id="sheet-button-123"><a ...>Tab Name</a>
+    const re1 = /id="sheet-button-(\d+)"[^>]*>\s*(?:<a[^>]*>)?([^<]+)</g;
     while ((m = re1.exec(html))) map[norm(m[2])] = m[1];
+    // Pattern B: {name: "Tab Name", ... gid: "123"}
     const re2 = /\{name:\s*"([^"]+)"[^}]*?gid:\s*"?(\d+)"?/g;
     while ((m = re2.exec(html))) map[norm(m[1])] = m[2];
-    if (Object.keys(map).length) S.gids = map;
-  } catch (e) { /* gviz fallback covers it */ }
+    // Pattern C: reversed order — {gid: "123", ... name: "Tab Name"}
+    const re3 = /gid:\s*"?(\d+)"?[^}]*?name:\s*"([^"]+)"/g;
+    while ((m = re3.exec(html))) if (!map[norm(m[2])]) map[norm(m[2])] = m[1];
+    // Pattern D: anchor hrefs — href="...gid=123..." >Tab Name<
+    const re4 = /href="[^"]*[?&]gid=(\d+)[^"]*"[^>]*>([^<]+)</g;
+    while ((m = re4.exec(html))) if (!map[norm(m[2])]) map[norm(m[2])] = m[1];
+    // Pattern E: JSON-ish "sheetId":123,"title":"Tab Name"
+    const re5 = /"(?:sheetId|gid)"\s*:\s*"?(\d+)"?\s*,\s*"(?:title|name)"\s*:\s*"([^"]+)"/g;
+    while ((m = re5.exec(html))) if (!map[norm(m[2])]) map[norm(m[2])] = m[1];
+
+    const n = Object.keys(map).length;
+    if (n) { S.gids = map; S.diag.push('gids:' + n); }
+    else S.diag.push('gids:0 (pubhtml parsed but no tabs matched)');
+  } catch (e) {
+    S.diag.push('pubhtml FAILED: ' + (e && e.message || e));
+  }
 }
 async function gviz(tab){
   const url = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:json&sheet=' + encodeURIComponent(tab) + '&t=' + Date.now();
@@ -693,13 +713,18 @@ async function fetchTab(name){
   const gid = S.gids[norm(name)];
   if (gid != null){
     try { return csvGrid(await fetchText(PUB_BASE + '?gid=' + gid + '&single=true&output=csv&cb=' + Date.now())); }
-    catch (e) { /* fall through to gviz */ }
+    catch (e) { S.diag.push(name + ': gid csv failed (' + (e && e.message || e) + ')'); }
+  } else {
+    S.diag.push(name + ': no gid found');
   }
-  try { return await gviz(name); }
-  catch (e) {
-    if (norm(name) === 'smwisespends') return csvGrid(await fetchText(PUB_CSV_DEFAULT + '&cb=' + Date.now()));
-    throw e;
+  if (SHEET_ID){
+    try { return await gviz(name); }
+    catch (e) { S.diag.push(name + ': gviz failed (' + (e && e.message || e) + ')'); }
   }
+  if (norm(name) === 'smwisespends'){
+    return csvGrid(await fetchText(PUB_CSV_DEFAULT + '&cb=' + Date.now()));
+  }
+  throw new Error('Could not fetch tab: ' + name);
 }
 function findHeaderRow(grid, mustHave){
   for (let i = 0; i < Math.min(grid.length, 10); i++){
@@ -948,16 +973,31 @@ function buildPlatform(data){
 /* ================= LOAD ================= */
 async function loadAll(manual){
   if (manual){ $('refreshBtn').textContent = '↻ Syncing…'; $('refreshBtm').textContent = '↻ Syncing…'; }
+  S.diag = [];
   try {
-    const [m, su, sm, ql, ga, me] = await Promise.all([
-      fetchTab('Master Sheet'), fetchTab('Summary'), fetchTab('SM Wise Spends'),
-      fetchTab('QL LEADS DATA'), fetchTab('Google MTD Spends'), fetchTab('FB MTD Spends')
-    ]);
-    S.data = { projects: parseMaster(m), summary: parseSummary(su), sm: parseSM(sm),
-      ql: parseQL(ql), gads: parseGoogle(ga), meta: parseMeta(me) };
+    await discoverGids();
+    const want = ['Master Sheet','Summary','SM Wise Spends','QL LEADS DATA','Google MTD Spends','FB MTD Spends'];
+    const got = await Promise.all(want.map(async t => {
+      try { return await fetchTab(t); } catch (e) { S.diag.push(t + ': ' + (e && e.message || e)); return null; }
+    }));
+    const [m, su, sm, ql, ga, me] = got;
+    if (!m) throw new Error('Master Sheet unavailable');
+
+    const snap = normalizeSnapshot(SNAPSHOT_RAW);
+    S.data = {
+      projects: parseMaster(m),
+      summary:  su ? parseSummary(su) : snap.summary,
+      sm:       sm ? parseSM(sm)      : snap.sm,
+      ql:       ql ? parseQL(ql)      : snap.ql,
+      gads:     ga ? parseGoogle(ga)  : snap.gads,
+      meta:     me ? parseMeta(me)    : snap.meta
+    };
     S.mode = 'live';
     S.lastSync = new Date();
+    if (S.diag.length) console.warn('PP dashboard — partial live load:', S.diag);
   } catch (e) {
+    S.diag.push('FATAL: ' + (e && e.message || e));
+    console.error('PP dashboard — live load failed:', S.diag);
     if (!S.data){ S.data = normalizeSnapshot(SNAPSHOT_RAW); S.mode = 'snapshot'; }
     else if (S.mode === 'live'){ S.mode = 'error'; }
   }
@@ -972,9 +1012,22 @@ async function loadAll(manual){
 function updateMeta(){
   const pill = $('statusPill'), txt = $('statusTxt');
   pill.className = 'pill';
-  if (S.mode === 'live'){ pill.classList.add('live'); txt.textContent = 'Live · Published Sheet'; }
-  else if (S.mode === 'snapshot'){ pill.classList.add('snap'); txt.textContent = 'Snapshot ' + SNAPSHOT_RAW.asOf; }
-  else { pill.classList.add('err'); txt.textContent = 'Sheet unreachable'; }
+  const diag = (S.diag && S.diag.length) ? S.diag.join('\n') : '';
+  if (S.mode === 'live'){
+    pill.classList.add('live');
+    txt.textContent = diag ? 'Live · partial' : 'Live · Published Sheet';
+    pill.title = diag ? ('Some tabs fell back to snapshot:\n' + diag) : 'All tabs loaded from the published sheet.';
+  }
+  else if (S.mode === 'snapshot'){
+    pill.classList.add('snap');
+    txt.textContent = 'Snapshot ' + SNAPSHOT_RAW.asOf;
+    pill.title = diag || 'Live fetch unavailable — showing the embedded snapshot.';
+  }
+  else {
+    pill.classList.add('err');
+    txt.textContent = 'Sheet unreachable';
+    pill.title = diag || 'Live fetch failed.';
+  }
   $('lastSync').textContent = S.lastSync ? S.lastSync.toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'}) : (S.mode==='snapshot' ? SNAPSHOT_RAW.asOf : '—');
 }
 
@@ -1627,7 +1680,7 @@ function init(){
   wireSort('cTable', S.cSort, renderCities);
   wireSort('sTable', S.sSort, renderSM);
 
-  discoverGids().finally(() => loadAll(false));
+  loadAll(false);
 }
 document.addEventListener('DOMContentLoaded', init);
 </script>
