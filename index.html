@@ -255,7 +255,7 @@ details.camps .cs{font-weight:700;white-space:nowrap}
     <div class="topbar">
       <div>
         <h1 id="vTitle">Overview</h1>
-        <div class="crumb">Spend Tracker Aug-26 · published Google Sheet · data till yesterday (T-1)</div>
+        <div class="crumb">Spends Tracker Database · published Google Sheet · data till yesterday (T-1)</div>
       </div>
       <div class="top-actions">
         <div class="win">
@@ -560,12 +560,11 @@ details.camps .cs{font-weight:700;white-space:nowrap}
 <script>
 'use strict';
 /* ================= CONFIG ================= */
-/* Published "Spends Tracker Database" (synced from the main Spend Tracker by Apps Script).
-   PUB_BASE is the source of truth — SHEET_ID is only used for the optional gviz fallback
-   and the "Open Sheet" button. Leave SHEET_ID blank if the doc isn't link-viewable. */
-const SHEET_ID = '';
+/* "Spends Tracker Database" — the Apps Script copies every tab here from the main
+   Spend Tracker, and this doc is the one published to web. Dashboard reads only this. */
+const SHEET_ID = '184Yt-PEyJtbWBRRtSVxQzdJqbffp71lDR7uI-TyFarA';
 const PUB_BASE = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRXZinVcktm-91m-kG0KTCcLahZ8cr4QG6NX8iBOABq6pCRS0ZIs3uRZVnjn_EeYpk9t_LZI5X2HVwP/pub';
-const SHEET_URL = SHEET_ID ? ('https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit') : (PUB_BASE + 'html');
+const SHEET_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit';
 const PUB_CSV_DEFAULT = PUB_BASE + '?output=csv';
 const ALL_TABS = ["SM Wise Spends","Aug Realization","Summary","Realisation Working","Sheet34","Realised Builtup","Dashboard","Master Sheet","Sheet45","Sheet42","QL LEADS DATA","CRM Project Names","Sheet37","Sheet41","Pivot Table 5","Pivot Table 4","Sheet38","ROI sheet","Sheet35","FY-Cost","Pivot Table 2","MTD Cost","Unmapped Spends","Google MTD Spends","FB MTD Spends","May (Launch)","99 Acres Projects","Launch","MTD ROI Mapping (May)","YTD ROI Mapping","Sheet19","Bangalore/Hyd Trend","CRM Project Dump","Sales Dump","MIS","Dash History"];
 const PLATFORMS = ['Search','DemandGen','PMax','Display','Meta','VAPP','WhatsApp Blast','Others'];
@@ -710,6 +709,12 @@ async function gviz(tab){
   return grid;
 }
 async function fetchTab(name){
+  // 1) gviz by tab NAME — no gid discovery needed, most reliable
+  if (SHEET_ID){
+    try { return await gviz(name); }
+    catch (e) { S.diag.push(name + ': gviz failed (' + (e && e.message || e) + ')'); }
+  }
+  // 2) published CSV by gid
   const gid = S.gids[norm(name)];
   if (gid != null){
     try { return csvGrid(await fetchText(PUB_BASE + '?gid=' + gid + '&single=true&output=csv&cb=' + Date.now())); }
@@ -717,10 +722,7 @@ async function fetchTab(name){
   } else {
     S.diag.push(name + ': no gid found');
   }
-  if (SHEET_ID){
-    try { return await gviz(name); }
-    catch (e) { S.diag.push(name + ': gviz failed (' + (e && e.message || e) + ')'); }
-  }
+  // 3) default published CSV (first tab only)
   if (norm(name) === 'smwisespends'){
     return csvGrid(await fetchText(PUB_CSV_DEFAULT + '&cb=' + Date.now()));
   }
