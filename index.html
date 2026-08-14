@@ -311,8 +311,8 @@ details.camps .cs{font-weight:700;white-space:nowrap}
           <div class="chartbox mid"><canvas id="tBurn"></canvas></div>
         </div>
         <div class="empty" id="tEmpty" style="display:none">
-          History abhi ban rahi hai — 11 AM sync script (v2) roz "Dash History" tab mein snapshot append karegi.
-          Jitne din ka data hoga, utna trend yahan dikhega. Abhi ke liye upar aaj ki position vs expected line hai.
+          History is still building — the 11 AM sync script (v2) appends a daily snapshot to the "Dash History" tab.
+          Trends will fill in as days accumulate. For now, the chart shows the current position against the expected line.
         </div>
       </section>
 
@@ -356,7 +356,7 @@ details.camps .cs{font-weight:700;white-space:nowrap}
           <button class="btn" id="pSortDir">▼ High → Low</button>
           <span class="count" id="pCount" style="margin-left:auto"></span>
         </div>
-        <p class="hint">Kisi bhi project pe click karo — platform-wise breakdown (Search / DemandGen / PMax / Meta / Direct) khul jayega.</p>
+        <p class="hint">Click any project to open its platform-wise breakdown (Search / DemandGen / PMax / Meta / Direct).</p>
         <div class="twrap"><table id="pTable" style="min-width:1420px">
           <thead><tr>
             <th class="l" data-k="project">Project <span class="arr"></span></th>
@@ -480,7 +480,7 @@ details.camps .cs{font-weight:700;white-space:nowrap}
           <input class="grow" id="unQ" placeholder="Search campaign…">
           <span class="count" id="unCount"></span>
         </div>
-        <p class="hint">Yeh campaigns Master Sheet ke kisi project se match nahi hue — campaign naming check karo ya Master mein project add karo. (Purane/band projects ke FY campaigns bhi yahin girte hain.)</p>
+        <p class="hint">These campaigns did not match any project in the Master Sheet — review campaign naming or add the project to Master. (Campaigns for older/closed projects also land here.)</p>
         <div class="twrap"><table id="unTable" style="min-width:760px">
           <thead><tr><th class="l">Campaign</th><th class="l">Platform</th><th class="l">Status</th><th>Spend</th></tr></thead>
           <tbody id="unBody"></tbody><tfoot id="unFoot"></tfoot>
@@ -1042,7 +1042,7 @@ function renderAttention(){
     const top = hits.sort((a,b) => (b.budget||0) - (a.budget||0)).slice(0,3).map(p => p.project).join(' · ');
     return '<button class="att-row" data-q="' + d.q + '"><span class="ic">' + d.ic + '</span><span class="n">' + hits.length + '</span><span class="lb">' + d.lb + '</span><span class="top">' + esc(top) + '</span></button>';
   }).join('');
-  $('attRows').innerHTML = html || '<div class="att-ok">✔ Sab set hai — koi red flag nahi.</div>';
+  $('attRows').innerHTML = html || '<div class="att-ok">✔ All clear — no red flags.</div>';
 }
 function renderOverview(){
   const P = paceInfo();
@@ -1150,7 +1150,7 @@ function renderTrends(){
   const series = synth
     ? [{ d: P.asOf, budget: T.budget, spent: T.spent, qlTgt: T.qlTgt, totQL: T.totQL }]
     : rows;
-  $('tCount').textContent = synth ? 'History empty — aaj ki position dikha rahe hain' : rows.length + ' days recorded';
+  $('tCount').textContent = synth ? 'History empty — showing current position' : rows.length + ' days recorded';
   $('tEmpty').style.display = synth ? '' : 'none';
 
   // stats
@@ -1168,7 +1168,7 @@ function renderTrends(){
     '<div><span>Projected EOM QL</span><b>' + fmtN(T.projQ || 0, 0) + '</b></div>' +
     '<div><span>Days left</span><b>' + P.remaining + '</b></div>';
   $('tBurnNote').textContent = burn3 != null && T.reqDay != null
-    ? (burn3 >= T.reqDay ? 'Burn required se upar hai — budget time pe khatam ho jayega' : 'Burn required se neeche — spend push karna hoga')
+    ? (burn3 >= T.reqDay ? 'Burn rate is above required — budget will exhaust before month-end' : 'Burn rate is below required — spend needs a push')
     : '';
 
   if (typeof Chart === 'undefined') return;
@@ -1297,7 +1297,7 @@ function openModal(p){
       '<td>' + (b.spend > 0 ? fmtMoney(b.spend, true) : '<span class="muted">—</span>') + '</td>' +
       '<td>' + fmtN(b.tot,0) + '</td><td>' + fmtN(b.ql,0) + '</td><td>' + fmtN(b.dql,0) + '</td><td><b>' + fmtN(tql,0) + '</b></td>' +
       '<td>' + (cpl ? fmtMoney(cpl, true) : '—') + '</td><td>' + (cpql ? fmtMoney(cpql, true) : '—') + '</td></tr>';
-  }).join('') : '<tr><td class="l muted" colspan="8">No campaign / lead match for this project — Google-Meta campaign names ya CRM enquiry name check karo.</td></tr>';
+  }).join('') : '<tr><td class="l muted" colspan="8">No campaign / lead match for this project — check the Google/Meta campaign names or the CRM enquiry name.</td></tr>';
   const tTql = tQl + tDql;
   $('mFoot').innerHTML = '<tr><td class="l">Total (mapped)</td><td>' + fmtMoney(tSpend, true) + '</td><td>' + fmtN(tTot,0) + '</td><td>' + fmtN(tQl,0) + '</td><td>' + fmtN(tDql,0) + '</td><td>' + fmtN(tTql,0) + '</td>' +
     '<td>' + (tTot > 0 && tSpend > 0 ? fmtMoney(tSpend/tTot, true) : '—') + '</td><td>' + (tTql > 0 && tSpend > 0 ? fmtMoney(tSpend/tTql, true) : '—') + '</td></tr>';
@@ -1307,7 +1307,7 @@ function openModal(p){
   $('mCamps').querySelector('summary').textContent = 'Matched campaigns (' + agg.gCamps.length + ' Google · ' + agg.mCamps.length + ' Meta)';
   $('mCampRows').innerHTML = camps.length ? camps.map(c =>
     '<div class="crow"><span class="cn" title="' + esc(c.n) + '">' + esc(c.n) + '</span><span class="ct">' + esc(c.t) + '</span><span class="cs">' + fmtMoney(c.s, true) + '</span></div>'
-  ).join('') : '<div class="crow muted">Koi campaign match nahi hua.</div>';
+  ).join('') : '<div class="crow muted">No campaigns matched.</div>';
   $('mCamps').open = false;
   $('overlay').classList.add('show');
   destroyModalCharts();
