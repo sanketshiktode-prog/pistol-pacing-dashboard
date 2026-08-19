@@ -842,15 +842,40 @@ async function discoverGids(){
   }
 }
 /* The PMax tab is named per month — PMax_2026_08, PMax_2026_09, …
-   Pick the newest one the sheet actually has, so nothing needs editing each month. */
-function pmaxTabName(){
+   Don't depend on gid discovery for this: build the likely names ourselves and
+   try them in order, newest first. gviz resolves tabs by name, so a name that
+   exists will simply work. */
+function pmaxCandidates(){
+  const out = [];
+  const push = n => { if (n && out.indexOf(n) < 0) out.push(n); };
+
+  // whatever gid discovery did find, if anything
   const keys = Object.keys(S.tabOrig || {});
-  const months = keys
-    .map(k => ({ k, m: k.match(/^pmax(\d{4})(\d{2})$/) }))
-    .filter(x => x.m)
-    .sort((a, b) => (b.m[1] + b.m[2]).localeCompare(a.m[1] + a.m[2]));
-  if (months.length) return S.tabOrig[months[0].k];
-  if (S.tabOrig && S.tabOrig['gadspmax']) return S.tabOrig['gadspmax'];
+  keys.map(k => ({ k, m: k.match(/^pmax(\d{4})(\d{2})$/) }))
+      .filter(x => x.m)
+      .sort((a, b) => (b.m[1] + b.m[2]).localeCompare(a.m[1] + a.m[2]))
+      .forEach(x => push(S.tabOrig[x.k]));
+
+  // then this month and the two before it
+  const base = (S.win && S.win.end) ? new Date(S.win.end) : new Date();
+  for (let i = 0; i < 3; i++){
+    const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
+    push('PMax_' + d.getFullYear() + '_' + String(d.getMonth() + 1).padStart(2, '0'));
+  }
+  push('GAds PMax');
+  return out;
+}
+
+async function fetchPMaxTab(){
+  for (const name of pmaxCandidates()){
+    try {
+      const grid = await fetchTab(name);
+      if (grid && grid.length){
+        const sp = parseSheetPMax(grid);
+        if (sp && Object.keys(sp.byAsset).length) return { sp, name };
+      }
+    } catch (e) { /* try the next candidate */ }
+  }
   return null;
 }
 
@@ -1142,13 +1167,11 @@ async function loadAll(manual){
   S.diag = [];
   try {
     await discoverGids();
-    const pmTab = pmaxTabName();
     const want = ['Master Sheet','Summary','SM Wise Spends','QL LEADS DATA','Google MTD Spends','FB MTD Spends'];
-    if (pmTab) want.push(pmTab);
     const got = await Promise.all(want.map(async t => {
       try { return await fetchTab(t); } catch (e) { S.diag.push(t + ': ' + (e && e.message || e)); return null; }
     }));
-    const [m, su, sm, ql, ga, me, gp] = got;
+    const [m, su, sm, ql, ga, me] = got;
     if (!m) throw new Error('Master Sheet unavailable');
 
     const snap = normalizeSnapshot(SNAPSHOT_RAW);
@@ -1160,13 +1183,12 @@ async function loadAll(manual){
       gads:     ga ? parseGoogle(ga)  : snap.gads,
       meta:     me ? parseMeta(me)    : snap.meta
     };
-    // PMax asset-group spend, written into the sheet by the Google Ads Script.
-    // Absent tab is fine — the CRM Feedback upload still works as a fallback.
-    if (gp && S.spendSrc !== 'upload'){
-      const sp = parseSheetPMax(gp);
-      if (sp && Object.keys(sp.byAsset).length){
-        S.spend = sp; S.spendSrc = 'sheet'; S.spendTab = pmTab;
-      }
+    // PMax asset-group spend from the monthly PMax_YYYY_MM tab.
+    // An uploaded spend export always wins; a missing tab is not an error.
+    if (S.spendSrc !== 'upload'){
+      const hit = await fetchPMaxTab();
+      if (hit){ S.spend = hit.sp; S.spendSrc = 'sheet'; S.spendTab = hit.name; }
+      else S.diag.push('PMax tab: none of ' + pmaxCandidates().join(', ') + ' returned data');
     }
     S.mode = 'live';
     S.lastSync = new Date();
