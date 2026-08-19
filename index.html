@@ -289,6 +289,20 @@ details.camps .cs{font-weight:700;white-space:nowrap}
               </div>
             </div>
           </div>
+          <span class="lb" style="margin-left:18px">Region</span>
+          <div class="dd" id="oCityDD">
+            <button class="dd-btn" id="oCityBtn" type="button">
+              <span id="oCityLabel">All regions</span><span class="caret">▼</span>
+            </button>
+            <div class="dd-pop" id="oCityPop">
+              <div id="oCityList"></div>
+              <div class="dd-sep"></div>
+              <div class="dd-actions">
+                <button type="button" data-a="all">Select all</button>
+                <button type="button" data-a="none">Reset</button>
+              </div>
+            </div>
+          </div>
           <span class="count" id="oCount"></span>
         </div>
         <div class="kpis" id="kpis"></div>
@@ -578,7 +592,7 @@ const S = {
   pf: { city: '', seg: '', camp: '', q: '', quick: '' }, pSort: { k: 'budget', d: -1 },
   cBkt: new Set(['Planned','Un-Planned','Builtup']), cSort: { k: 'budget', d: -1 },
   sf: { city: '', q: '' }, sSort: { k: 'budget', d: -1 },
-  pxMode: 'spend', oBkt: new Set(['Planned','Un-Planned','Builtup']), unQ: '',
+  pxMode: 'spend', oBkt: new Set(['Planned','Un-Planned','Builtup']), oCity: new Set(), unQ: '',
   charts: {}, gids: {}, pRows: [], diag: []
 };
 
@@ -1097,8 +1111,19 @@ function bktLabelFor(B){
 function bktLabel(){ return bktLabelFor(S.oBkt); }
 function overviewProjects(){
   const all = S.data.projects;
-  if (!S.oBkt || S.oBkt.size === 0 || S.oBkt.size === 3) return all;
-  return all.filter(p => S.oBkt.has(p.bucket));
+  const byBkt = (!S.oBkt || S.oBkt.size === 0 || S.oBkt.size === 3)
+    ? all : all.filter(p => S.oBkt.has(p.bucket));
+  if (!S.oCity || S.oCity.size === 0) return byBkt;
+  return byBkt.filter(p => S.oCity.has(p.city));
+}
+function allCities(){
+  return [...new Set(S.data.projects.map(p => p.city).filter(Boolean))].sort();
+}
+function cityLabel(){
+  const C = S.oCity;
+  if (!C || C.size === 0 || C.size === allCities().length) return 'All regions';
+  if (C.size <= 2) return [...C].join(' + ');
+  return C.size + ' regions';
 }
 function renderAttention(){
   const en = enrich(overviewProjects());
@@ -1117,13 +1142,33 @@ function renderAttention(){
   }).join('');
   $('attRows').innerHTML = html || '<div class="att-ok">✔ All clear — no red flags.</div>';
 }
+function buildCityOptions(){
+  const host = $('oCityList');
+  if (!host) return;
+  const cities = allCities();
+  // count within the currently selected buckets, so counts reflect the bucket filter
+  const bktScope = (!S.oBkt || S.oBkt.size === 0 || S.oBkt.size === 3)
+    ? S.data.projects : S.data.projects.filter(p => S.oBkt.has(p.bucket));
+  const sig = cities.join('|') + '::' + [...S.oCity].sort().join('|') + '::' + [...S.oBkt].sort().join('|');
+  if (host.dataset.sig === sig) return;   // nothing changed — skip the rebuild
+  host.dataset.sig = sig;
+  const none = S.oCity.size === 0;        // empty selection means "all"
+  host.innerHTML = cities.map(c =>
+    '<label class="dd-item"><input type="checkbox" data-city="' + esc(c) + '"' +
+    ((none || S.oCity.has(c)) ? ' checked' : '') + '><span>' + esc(c) + '</span>' +
+    '<span class="sub">' + fmtN(bktScope.filter(p => p.city === c).length, 0) + '</span></label>'
+  ).join('');
+}
+
 function renderOverview(){
   const P = paceInfo();
   const scope = overviewProjects();
   const T = totalsOf(scope);
   const stS = paceStatus(T.paceS), stQ = paceStatus(T.paceQ);
-  $('oCount').textContent = fmtN(scope.length, 0) + ' projects · ' + bktLabel();
+  $('oCount').textContent = fmtN(scope.length, 0) + ' projects · ' + bktLabel() + ' · ' + cityLabel();
   $('oDDLabel').textContent = bktLabel();
+  $('oCityLabel').textContent = cityLabel();
+  buildCityOptions();
   // per-bucket counts inside the popover
   ['Planned','Un-Planned','Builtup'].forEach(b => {
     const el = document.querySelector('#oDDPop .sub[data-c="' + b + '"]');
@@ -1666,6 +1711,32 @@ function init(){
   }
   wireBktDropdown('oDD', 'oDDBtn', 'oDDPop', () => S.oBkt, v => S.oBkt = v, renderOverview);
   wireBktDropdown('cDD', 'cDDBtn', 'cDDPop', () => S.cBkt, v => S.cBkt = v, renderCities);
+
+  // Region dropdown — options are built at render time, so delegate
+  const cityDD = $('oCityDD'), cityBtn = $('oCityBtn'), cityPop = $('oCityPop');
+  cityBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    document.querySelectorAll('.dd.open').forEach(d => { if (d !== cityDD) d.classList.remove('open'); });
+    cityDD.classList.toggle('open');
+  });
+  cityPop.addEventListener('click', e => e.stopPropagation());
+  cityPop.addEventListener('change', e => {
+    const cb = e.target;
+    if (!cb || !cb.dataset || !cb.dataset.city) return;
+    if (S.oCity.size === 0){
+      // was "all" — materialise the full set, then drop the one just unchecked
+      allCities().forEach(c => S.oCity.add(c));
+    }
+    if (cb.checked) S.oCity.add(cb.dataset.city); else S.oCity.delete(cb.dataset.city);
+    if (S.oCity.size === allCities().length) S.oCity.clear();   // all selected == no filter
+    $('oCityList').dataset.sig = '';
+    renderOverview();
+  });
+  cityPop.querySelectorAll('.dd-actions button').forEach(b => b.addEventListener('click', () => {
+    S.oCity.clear();   // empty == no filter == all regions
+    $('oCityList').dataset.sig = '';
+    renderOverview();
+  }));
   document.addEventListener('click', () => document.querySelectorAll('.dd.open').forEach(d => d.classList.remove('open')));
   $('sfCity').addEventListener('change', e => { S.sf.city = e.target.value; renderSM(); });
   $('sfQ').addEventListener('input', e => { S.sf.q = e.target.value; renderSM(); });
